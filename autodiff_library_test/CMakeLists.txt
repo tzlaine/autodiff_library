@@ -1,4 +1,5 @@
 include_directories(${CMAKE_SOURCE_DIR}/autodiff_library/src)
+include_directories(${CMAKE_SOURCE_DIR})
 
 add_executable(
     autodiff_library_test
