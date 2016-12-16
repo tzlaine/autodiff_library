@@ -2,7 +2,7 @@
 #define BOOST_TEST_MODULE autodiff_test
 #include <boost/test/included/unit_test.hpp>
 
-#define Epsilon 10^-6
+double const Epsilon = 10.0e-6;
 #define CHECK_CLOSE(A,B) do { BOOST_CHECK_CLOSE(A,B,Epsilon); } while(0)
 
 using namespace AutoDiff;
