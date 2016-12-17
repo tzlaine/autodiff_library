@@ -42,17 +42,7 @@ namespace expr {
 
     namespace literals {
 
-        // TODO: Yet another macro.
-        template <char ...c>
-        constexpr auto operator"" _p ()
-        {
-            using i = boost::hana::llong<boost::hana::ic_detail::parse<sizeof...(c)>({c...})>;
-            static_assert(1 <= i::value, "Placeholders must be >= 1.");
-            return autodiff_expr<
-                boost::yap::expr_kind::terminal,
-                boost::hana::tuple<boost::yap::placeholder<i::value>>
-            >{};
-        }
+        BOOST_YAP_USER_LITERAL_PLACEHOLDER_OPERATOR(autodiff_expr)
 
     }
 
