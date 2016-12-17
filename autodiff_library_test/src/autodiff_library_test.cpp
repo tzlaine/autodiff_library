@@ -1,10 +1,10 @@
 #include "autodiff.h"
 
 #include <iostream>
-#include <boost/type_index.hpp> // TODO
 
-#include <boost/yap/yap.hpp>
+#include <boost/yap/expression.hpp>
 #include <boost/polymorphic_cast.hpp>
+#include <boost/hana/for_each.hpp>
 
 #define BOOST_TEST_MODULE autodiff_test
 #include <boost/test/included/unit_test.hpp>
@@ -48,7 +48,10 @@ namespace expr {
         {
             using i = boost::hana::llong<boost::hana::ic_detail::parse<sizeof...(c)>({c...})>;
             static_assert(1 <= i::value, "Placeholders must be >= 1.");
-            return autodiff_expr<yap::expr_kind::placeholder, boost::hana::tuple<i>>{};
+            return autodiff_expr<
+                boost::yap::expr_kind::terminal,
+                boost::hana::tuple<boost::yap::placeholder<i::value>>
+            >{};
         }
 
     }
@@ -74,11 +77,11 @@ namespace expr {
     struct xform
     {
         template <long long I>
-        Node * operator() (yap::terminal_tag, boost::hana::llong<I>)
+        Node * operator() (yap::terminal_tag, boost::yap::placeholder<I>)
         {
             if (list_.size() < I)
                 list_.resize(I);
-            auto & retval = list_[I];
+            auto & retval = list_[I - 1];
             if (retval == nullptr)
                 retval = create_var_node();
             return retval;
@@ -86,16 +89,6 @@ namespace expr {
 
         Node * operator() (yap::terminal_tag, double x)
         { return create_param_node(x); }
-
-        template <typename Expr1, typename Expr2>
-        Node * operator() (yap::plus_tag, Expr1 && expr1, Expr2 && expr2)
-        {
-            return create_binary_op_node(
-                OP_PLUS,
-                yap::transform(yap::as_expr(std::forward<Expr1 &&>(expr1)), *this),
-                yap::transform(yap::as_expr(std::forward<Expr2 &&>(expr2)), *this)
-            );
-        }
 
         template <typename Expr>
         Node * operator() (yap::call_tag, sin_tag, Expr && expr)
@@ -130,6 +123,16 @@ namespace expr {
             return create_binary_op_node(
                 OP_POW,
                 yap::transform(yap::as_expr(std::forward<Expr &&>(expr)), *this)
+            );
+        }
+
+        template <typename Expr1, typename Expr2>
+        Node * operator() (yap::plus_tag, Expr1 && expr1, Expr2 && expr2)
+        {
+            return create_binary_op_node(
+                OP_PLUS,
+                yap::transform(yap::as_expr(std::forward<Expr1 &&>(expr1)), *this),
+                yap::transform(yap::as_expr(std::forward<Expr2 &&>(expr2)), *this)
             );
         }
 
@@ -198,9 +201,8 @@ struct F{
 
 BOOST_FIXTURE_TEST_SUITE(all, F)
 
-Node* build_linear_fun1(vector<Node*>& list)
+Node* build_linear_fun1_manually(vector<Node*>& list)
 {
-#if 0
 	//f(x1,x2,x3) = -5*x1+sin(10)*x1+10*x2-x3/6
 	PNode* v5 = create_param_node(-5);
 	PNode* v10 = create_param_node(10);
@@ -224,18 +226,25 @@ Node* build_linear_fun1(vector<Node*>& list)
 	list.push_back(x2);
 	list.push_back(x3);
 	return op8;
-#else
-        using namespace expr;
-        using namespace expr::literals;
-        auto expr = -5 * 1_p + sin_(10) * 1_p + 10 * 2_p - 3_p / 6;
-        return to_auto_diff_node(expr, list, -1.9, 2, 5./6.);
-#endif
 }
 
-
-Node* build_linear_function2(vector<Node*>& list)
+Node* build_linear_fun1(vector<Node*>& list)
 {
-	//f(x1,x2,x3) = -5*x1+sin(10)*x1+10*x2-x3/6
+    //f(x1,x2,x3) = -5*x1+sin(10)*x1+10*x2-x3/6
+    using namespace expr;
+    using namespace expr::literals;
+    return to_auto_diff_node(
+        -5 * 1_p + sin_(10) * 1_p + 10 * 2_p - 3_p / 6,
+        list,
+        -1.9,
+        2,
+        5./6.
+    );
+}
+
+Node* build_linear_function2_manually(vector<Node*>& list)
+{
+	//f(x1,x2,x3) = -5*x1+-10*x1+10*x2-x3/6
 	PNode* v5 = create_param_node(-5);
 	PNode* v10 = create_param_node(10);
 	PNode* v6 = create_param_node(6);
@@ -246,7 +255,7 @@ Node* build_linear_function2(vector<Node*>& list)
 	list.push_back(x2);
 	list.push_back(x3);
 	OPNode* op1 = create_binary_op_node(OP_TIMES,v5,x1); //op1 = v5*x1
-	OPNode* op2 = create_uary_op_node(OP_NEG,v10);       //op2 = sin(v10)
+	OPNode* op2 = create_uary_op_node(OP_NEG,v10);       //op2 = -v10
 	OPNode* op3 = create_binary_op_node(OP_TIMES,op2,x1);//op3 = op2*x1
 	OPNode* op4 = create_binary_op_node(OP_PLUS,op1,op3);//op4 = op1 + op3
 	OPNode*	op5 = create_binary_op_node(OP_TIMES,v10,x2);//op5 = v10*x2
@@ -259,7 +268,22 @@ Node* build_linear_function2(vector<Node*>& list)
 	return op8;
 }
 
-Node* build_nl_function1(vector<Node*>& list)
+Node* build_linear_function2(vector<Node*>& list)
+{
+    //f(x1,x2,x3) = -5*x1+-10*x1+10*x2-x3/6
+    using namespace expr;
+    using namespace expr::literals;
+    auto ten = boost::yap::make_terminal<autodiff_expr>(10);
+    return to_auto_diff_node(
+        -5 * 1_p + -ten * 1_p + 10 * 2_p - 3_p / 6,
+        list,
+        -1.9,
+        2,
+        5./6.
+    );
+}
+
+Node* build_nl_function1_manually(vector<Node*>& list)
 {
 //	(x1*x2 * sin(x1))/x3 + x2*x4 - x1/x2
 	VNode* x1 = create_var_node();
@@ -284,6 +308,21 @@ Node* build_nl_function1(vector<Node*>& list)
 	OPNode* op7 = create_binary_op_node(OP_DIVID,x1,x2);
 	OPNode* op8 = create_binary_op_node(OP_MINUS,op6,op7);
 	return op8;
+}
+
+Node* build_nl_function1(vector<Node*>& list)
+{
+    // (x1*x2 * sin(x1))/x3 + x2*x4 - x1/x2
+    using namespace expr;
+    using namespace expr::literals;
+    return to_auto_diff_node(
+        (1_p * 2_p * sin_(1_p)) / 3_p + 2_p * 4_p - 1_p / 2_p,
+        list,
+	-1.23,
+	7.1231,
+	2,
+	-10
+    );
 }
 
 BOOST_AUTO_TEST_CASE( test_linear_fun1 )
